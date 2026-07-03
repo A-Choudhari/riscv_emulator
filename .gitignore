@@ -1,0 +1,4 @@
+*.o
+rvsim
+*.csv
+*.png

@@ -14,15 +14,63 @@ namespace {
 // b), SLT/SLTI (signed compare), SLTU/SLTIU (unsigned compare -- careful
 // with the int32_t -> uint32_t cast).
 int32_t aluCompute(Op op, int32_t a, int32_t b) {
-    (void)op; (void)a; (void)b;
-    return 0;
+    // create a switch case for each operation
+    switch(op) {
+        case Op::SUB:
+            return a - b;
+        case Op::SLL:
+        case Op::SLLI:
+            return a << b;
+        case Op::SLT:
+        case Op::SLTI:
+            return a < b;
+        case Op::SLTU:
+        case Op::SLTIU:
+            return (uint32_t)a < (uint32_t)b;
+        case Op::XOR:
+        case Op::XORI:
+            return a ^ b;
+        case Op::ADD:
+        case Op::ADDI:
+            return a + b;
+        case Op::SRL:
+        case Op::SRLI:
+            return (int32_t)((uint32_t)a >> (b & 0x1F));
+        case Op::SRA:
+        case Op::SRAI:
+            return a >> (b & 0x1F);
+        case Op::OR:
+        case Op::ORI:
+            return a | b;
+        case Op::AND:
+        case Op::ANDI:
+            return a & b;
+        default:
+            assert(false && "aluCompute called on a non-ALU opcode");
+            return 0;
+    }
 }
 
 // TODO: implement branch condition evaluation for BEQ/BNE/BLT/BGE/BLTU/BGEU.
 // (BLTU/BGEU are unsigned compares -- same cast caveat as SLTU above.)
 bool branchCond(Op op, int32_t a, int32_t b) {
-    (void)op; (void)a; (void)b;
-    return false;
+    switch(op) {
+        case BEQ:
+            return a == b;
+        case BNE:
+            return a != b;
+        case BLT:
+            return a < b;
+        case BGE:
+            return a >= b;
+        case BLTU:
+            return (uint32_t)a < (uint32_t)b;
+        case BGEU:
+            return (uint32_t)a >= (uint32_t)b;
+        default:
+            assert(false && "branchCond called non-branch operation");
+            return false;
+    }
 }
 
 } // namespace

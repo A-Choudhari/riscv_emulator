@@ -160,10 +160,16 @@ void Simulator::stageID(IF_ID_Latch& cur, ID_EX_Latch& next) {
 }
 
 void Simulator::stageIF(IF_ID_Latch& next) {
-    (void)next;
-    // TODO: fetch imem_.fetch(pc_) into `next` (unless halted_, or unless
-    // this cycle is a load-use stall in which case IF should freeze --
-    // re-present the current ifid_ instead of fetching).
+    const Instruction& fetched = imem_.fetch(pc_);
+    if(fetched.op == Op::HALT) {
+        halted_ = true;
+        next.valid = false;
+        return;
+    }
+    next.instr = fetched;
+    next.valid = true;
+    next.pc = pc_;
+    pc_+=4;
 }
 
 int32_t Simulator::forwardOperand(int regNum, int32_t rawVal,

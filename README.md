@@ -1,4 +1,4 @@
-# RV32I 5-Stage Pipeline Simulator (starter code)
+# RV32I 5-Stage Pipeline Simulator
 
 Scaffolding for a cycle-accurate simulator of a classic 5-stage RISC-V
 pipeline (IF -> ID -> EX -> MEM -> WB), in C++17 with no dependencies

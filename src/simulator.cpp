@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <cassert>
 
 namespace {
 
@@ -55,17 +56,17 @@ int32_t aluCompute(Op op, int32_t a, int32_t b) {
 // (BLTU/BGEU are unsigned compares -- same cast caveat as SLTU above.)
 bool branchCond(Op op, int32_t a, int32_t b) {
     switch(op) {
-        case BEQ:
+        case Op::BEQ:
             return a == b;
-        case BNE:
+        case Op::BNE:
             return a != b;
-        case BLT:
+        case Op::BLT:
             return a < b;
-        case BGE:
+        case Op::BGE:
             return a >= b;
-        case BLTU:
+        case Op::BLTU:
             return (uint32_t)a < (uint32_t)b;
-        case BGEU:
+        case Op::BGEU:
             return (uint32_t)a >= (uint32_t)b;
         default:
             assert(false && "branchCond called non-branch operation");
@@ -78,7 +79,7 @@ bool branchCond(Op op, int32_t a, int32_t b) {
 Simulator::Simulator(std::vector<Instruction> program, size_t dataMemBytes)
     : imem_(std::move(program)), dmem_(dataMemBytes) {}
 
-bool Simulator::step(uint64_t cycleNum) {]
+bool Simulator::step(uint64_t cycleNum) {
     // TODO: implement the full cycle. See the extended comment on this
     // function's declaration in simulator.h for the responsibilities.
     //
@@ -124,7 +125,7 @@ bool Simulator::step(uint64_t cycleNum) {]
     stageID(ifid_, nextIdEx);
     // 5. IF Stage (writes nextIfId)
     if (!isStall) {
-        stageID(ifid_, nextIdEx);
+        stageIF(nextIfId);
     }
     if (redirectEx_) {
         pc_ = redirectTargetEx_;
@@ -179,7 +180,7 @@ void Simulator::run(uint64_t maxCycles) {
 
 void Simulator::stageWB() {
     if(memwb_.valid) {
-        regs_.write(memwb_.instr.rd(), memwb_.writebackVal);
+        regs_.write(memwb_.instr.rd, memwb_.writebackVal);
     }
 }
 
@@ -211,10 +212,10 @@ void Simulator::stageMEM(EX_MEM_Latch& cur, MEM_WB_Latch& next) {
                 next.writebackVal = dmem_.readWord(cur.aluResult);
                 break;
             default:
-                throw runtime_error("Invalid load opcode");
+                throw std::runtime_error("Invalid load opcode");
             }
     } else if(classify(cur.instr.op) == OpClass::STORE) {
-        switch(curinstr.op) {
+        switch(cur.instr.op) {
             case Op::SB:
                 dmem_.writeByte(cur.aluResult, (int8_t)cur.storeVal);
                 break;
@@ -225,7 +226,7 @@ void Simulator::stageMEM(EX_MEM_Latch& cur, MEM_WB_Latch& next) {
                 dmem_.writeWord(cur.aluResult, cur.storeVal);
                 break;
             default:
-                throw runtime_error("Invalid store opcode");        
+                throw std::runtime_error("Invalid store opcode");        
         }
         next.writebackVal = 0;
     } else {
@@ -259,8 +260,8 @@ void Simulator::stageEX(ID_EX_Latch& cur, EX_MEM_Latch& next) {
     next.pc = cur.pc;
 
     bool fromEx, fromMem;
-    int32_t rs1 = forwardOperand(cur.instr.rs1, cur.rs1Val, exmem_, memwb_, &fromEx, &fromMem);
-    int32_t rs2 = forwardOperand(cur.instr.rs2, cur.rs2Val, exmem_, memwb_, &fromEx, &fromMem);
+    int32_t rs1 = forwardOperand(cur.instr.rs1, cur.rs1val, exmem_, memwb_, fromEx, fromMem);
+    int32_t rs2 = forwardOperand(cur.instr.rs2, cur.rs2val, exmem_, memwb_, fromEx, fromMem);
     
     if (usesRs1(cur.instr.op)) stats_.forwarding.totalAluOperandsChecked++;
     if (usesRs2(cur.instr.op)) stats_.forwarding.totalAluOperandsChecked++;
@@ -296,7 +297,7 @@ void Simulator::stageEX(ID_EX_Latch& cur, EX_MEM_Latch& next) {
 
     if (cur.instr.op == Op::JALR) {
         redirectEx_ = true;
-        redirectTargetEx_ = (val1 + cur.instr.imm) & ~1;
+        redirectTargetEx_ = (rs1 + cur.instr.imm) & ~1;
     }
 
     if(isBranch(cur.instr.op)) {
@@ -392,7 +393,7 @@ int32_t Simulator::forwardOperand(int regNum, int32_t rawVal,
     if(regNum == 0) {
         return 0;
     }
-    if(regNum == exmem.instr.rd && exmem.valid && writesRegister(exmem.instr.op) && classify(exmem.instr.op)) {
+    if(regNum == exmem.instr.rd && exmem.valid && writesRegister(exmem.instr.op) && classify(exmem.instr.op) != OpClass::LOAD) {
         fromEx = true;
         return exmem.aluResult;
     } else if(regNum == memwb.instr.rd && memwb.valid && writesRegister(memwb.instr.op)) {

@@ -34,6 +34,7 @@ struct ID_EX_Latch {
     Instruction instr;
     uint32_t pc = 0;
     int32_t rs1val = 0, rs2val = 0;
+    bool predictedTaken = false; // branch prediction made in ID
     // TODO: add whatever else EX needs -- e.g. branch prediction info if
     // you're predicting in ID.
 };

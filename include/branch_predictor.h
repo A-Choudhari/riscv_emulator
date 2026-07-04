@@ -28,10 +28,10 @@ public:
     // Returns true if this PC's branch should be predicted taken.
     // Must NOT modify predictor state (this is just a lookup).
     bool predict(uint32_t pc) const {
-        if(bht.contains(pc)) {
-            return bht[pc] >= 2;
+        auto it = bht.find(pc);
+        if (it != bht.end()) {
+            return it->second >= 2;
         }
-        bht[pc] = 0;
         return false;
     }
 
@@ -43,7 +43,8 @@ public:
         if(predicted == actuallyTaken) {
             correctPredictions++;
         }
-        uint8_t state = bht.contains(pc) ? bht[pc] : 0;
+        auto it = bht.find(pc);
+        uint8_t state = (it != bht.end()) ? it->second : 0;
         if(actuallyTaken) {
             if(state < 3) {
                 state++;
@@ -54,6 +55,7 @@ public:
             }
         }
         bht[pc] = state;
+        totalBranches++;
     }
 
     double accuracy() const {

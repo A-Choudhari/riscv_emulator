@@ -9,16 +9,16 @@ namespace {
 
 void printUsage(const char* prog) {
     std::cerr << "Usage:\n"
-              << "  " << prog << " <program.s> [--diagram] [--diagram-cycles N] [--trace out.csv] [--maxcycles N]"
+              << "  " << prog << " <program.s> [--harts N] [--diagram] [--diagram-cycles N] [--trace out.csv] [--maxcycles N]"
                  " [--dump-regs] [--dump-mem ADDR,COUNT]\n"
               << "  " << prog << " --compare <baseline.s> <optimized.s>\n";
 }
 
-SimulationStats runOne(const std::string& path, bool diagram, uint64_t diagramCycles,
+SimulationStats runOne(const std::string& path, int numHarts, bool diagram, uint64_t diagramCycles,
                         const std::string& traceCsv, uint64_t maxCycles, bool printHeader = true,
                         bool dumpRegs = false, const std::string& dumpMemSpec = "") {
     auto program = Assembler::assembleFile(path);
-    Simulator sim(std::move(program));
+    Simulator sim(std::move(program), numHarts);
     sim.run(maxCycles);
 
     if (printHeader) std::cout << "\n### " << path << " ###\n";
@@ -32,11 +32,13 @@ SimulationStats runOne(const std::string& path, bool diagram, uint64_t diagramCy
         std::cout << "\n(trace written to " << traceCsv << ")\n";
     }
     if (dumpRegs) {
-        std::cout << "\n-- Registers --\n";
-        for (int i = 0; i < 32; i++) {
-            std::cout << "x" << i << "=" << sim.registers().read(i) << (i % 4 == 3 ? "\n" : "\t");
+        for (int h = 0; h < numHarts; h++) {
+            std::cout << "\n-- Hart " << h << " Registers --\n";
+            for (int i = 0; i < 32; i++) {
+                std::cout << "x" << i << "=" << sim.registers(h).read(i) << (i % 4 == 3 ? "\n" : "\t");
+            }
+            std::cout << "\n";
         }
-        std::cout << "\n";
     }
     if (!dumpMemSpec.empty()) {
         size_t comma = dumpMemSpec.find(',');
@@ -60,8 +62,8 @@ int main(int argc, char** argv) {
     if (args[0] == "--compare") {
         if (args.size() < 3) { printUsage(argv[0]); return 1; }
         try {
-            auto baseline = runOne(args[1], false, 60, "", 2'000'000);
-            auto optimized = runOne(args[2], false, 60, "", 2'000'000);
+            auto baseline = runOne(args[1], 1, false, 60, "", 2'000'000);
+            auto optimized = runOne(args[2], 1, false, 60, "", 2'000'000);
             std::cout << "\n===== Comparison =====\n";
             std::cout << "Baseline CPI:  " << baseline.cpi() << "  (" << baseline.cycles << " cycles / "
                        << baseline.instructionsRetired << " instrs)\n";
@@ -79,6 +81,7 @@ int main(int argc, char** argv) {
     }
 
     std::string path = args[0];
+    int numHarts = 1;
     bool diagram = false;
     uint64_t diagramCycles = 80;
     std::string traceCsv;
@@ -87,7 +90,8 @@ int main(int argc, char** argv) {
     std::string dumpMemSpec;
 
     for (size_t i = 1; i < args.size(); i++) {
-        if (args[i] == "--diagram") diagram = true;
+        if (args[i] == "--harts" && i + 1 < args.size()) numHarts = std::stoi(args[++i]);
+        else if (args[i] == "--diagram") diagram = true;
         else if (args[i] == "--diagram-cycles" && i + 1 < args.size()) diagramCycles = std::stoull(args[++i]);
         else if (args[i] == "--trace" && i + 1 < args.size()) traceCsv = args[++i];
         else if (args[i] == "--maxcycles" && i + 1 < args.size()) maxCycles = std::stoull(args[++i]);
@@ -97,7 +101,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        runOne(path, diagram, diagramCycles, traceCsv, maxCycles, false, dumpRegs, dumpMemSpec);
+        runOne(path, numHarts, diagram, diagramCycles, traceCsv, maxCycles, false, dumpRegs, dumpMemSpec);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;

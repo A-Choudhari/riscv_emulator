@@ -60,6 +60,7 @@ struct MEM_WB_Latch {
 // printDiagram()/writeTraceCsv() as you populate trace_ during step().
 struct TraceEvent {
     uint64_t cycle;
+    int hartId;
     uint32_t instrPc;
     std::string instrText;
     std::string stage; // e.g. "IF","ID","EX","MEM","WB","STALL","FLUSH"
@@ -93,16 +94,37 @@ struct SimulationStats {
     }
 };
 
+struct Hart {
+    int id = 0;
+    RegisterFile regs;
+    BranchPredictor predictor;
+    IF_ID_Latch ifid;
+    ID_EX_Latch idex;
+    EX_MEM_Latch exmem;
+    MEM_WB_Latch memwb;
+
+    uint32_t pc = 0;
+    bool halted = false;
+
+    bool redirectEx = false;
+    uint32_t redirectTargetEx = 0;
+    bool redirectId = false;
+    uint32_t redirectTargetId = 0;
+    bool isStall = false;
+
+    SimulationStats stats;
+};
+
 class Simulator {
 public:
-    Simulator(std::vector<Instruction> program, size_t dataMemBytes = 1 << 16);
+    Simulator(std::vector<Instruction> program, int numHarts = 1, size_t dataMemBytes = 1 << 16);
 
     // Runs until the pipeline drains after fetching HALT, or maxCycles is hit.
     void run(uint64_t maxCycles = 2'000'000);
 
     const SimulationStats& stats() const { return stats_; }
     const std::vector<TraceEvent>& trace() const { return trace_; }
-    const RegisterFile& registers() const { return regs_; }
+    const RegisterFile& registers(int hartId = 0) const { return harts_.at(hartId).regs; }
     const DataMemory& memory() const { return dmem_; }
 
     // Pretty-prints the classic Patterson & Hennessy colored-grid pipeline
@@ -117,69 +139,28 @@ public:
 private:
     InstructionMemory imem_;
     DataMemory dmem_;
-    RegisterFile regs_;
-    BranchPredictor predictor_;
-    SimulationStats stats_;
+    SimulationStats stats_; // Aggregated stats
     std::vector<TraceEvent> trace_;
 
-    // Current latch state
-    IF_ID_Latch ifid_;
-    ID_EX_Latch idex_;
-    EX_MEM_Latch exmem_;
-    MEM_WB_Latch memwb_;
+    std::vector<Hart> harts_;
 
-    uint32_t pc_ = 0;
-    bool halted_ = false; // set once HALT has been fetched
-
-    // TODO: you will likely need more private state here to coordinate
-    // hazard detection and control-flow redirects across the stage
-    // functions within a single step() call -- e.g. flags/targets so that
-    // an EX-stage misprediction (older instruction) can override an
-    // ID-stage prediction redirect (younger instruction) discovered in the
-    // SAME cycle, and so IF knows to freeze on a load-use stall. How you
-    // structure that is up to you.
-    bool redirectEx_ = false;          // Set by EX to trigger a pipeline redirect/flush
-    uint32_t redirectTargetEx_ = 0;
-    bool redirectId_ = false;          // Set by ID to trigger an unconditional jump or branch prediction redirection
-    uint32_t redirectTargetId_ = 0; 
     // One simulated clock edge. Return false once the pipeline has fully
     // drained after HALT is fetched (so run() knows to stop).
-    //
-    // TODO: implement the whole cycle:
-    //   - Detect hazards (load-use) using CURRENT latch contents.
-    //   - Run each stage (WB, MEM, EX, ID, IF) computing "next" latch
-    //     values from CURRENT latch values -- order matters for at least
-    //     one thing: writing the register file in WB before ID reads it
-    //     lets same-cycle write-then-read work without a special-case
-    //     forwarding path.
-    //   - Resolve any control-flow redirects/squashes and figure out what
-    //     pc_ should be for the NEXT cycle.
-    //   - Log TraceEvents for whatever stage(s) were active this cycle.
-    //   - Commit: current latches = next latches.
     bool step(uint64_t cycleNum);
 
     // Stage implementations. Read the CURRENT latch (cur) and write the
-    // "next" output latch (next); don't mutate `cur` itself here -- these
-    // should be pure functions of their inputs, only touching member
-    // state (regs_, dmem_, predictor_, stats_) for their own stage's job.
-    void stageWB();
-    void stageMEM(EX_MEM_Latch& cur, MEM_WB_Latch& next);
-    void stageEX(ID_EX_Latch& cur, EX_MEM_Latch& next);
-    void stageID(IF_ID_Latch& cur, ID_EX_Latch& next);
-    void stageIF(IF_ID_Latch& next);
+    // "next" output latch (next).
+    void stageWB(Hart& hart);
+    void stageMEM(Hart& hart, EX_MEM_Latch& cur, MEM_WB_Latch& next);
+    void stageEX(Hart& hart, ID_EX_Latch& cur, EX_MEM_Latch& next);
+    void stageID(Hart& hart, IF_ID_Latch& cur, ID_EX_Latch& next);
+    void stageIF(Hart& hart, IF_ID_Latch& next);
 
     // Given a register number and the raw value read for it back in ID,
-    // return the value EX should actually use -- forwarded from EX/MEM or
-    // MEM/WB if a more recent in-flight instruction produces that
-    // register, otherwise the raw value. Should also update whichever of
-    // fromEx/fromMem was used, for stats-tracking purposes.
-    //
-    // TODO: implement. Remember loads can't forward from EX/MEM (their
-    // data isn't ready until MEM completes) -- that's exactly the
-    // load-use hazard case, which should be handled as a stall instead.
-    int32_t forwardOperand(int regNum, int32_t rawVal,
+    // return the value EX should actually use.
+    int32_t forwardOperand(Hart& hart, int regNum, int32_t rawVal,
                             const EX_MEM_Latch& exmem, const MEM_WB_Latch& memwb,
                             bool& forwardedFromEx, bool& forwardedFromMem);
 
-    void logStage(uint64_t cycle, uint32_t pc, const std::string& text, const char* stageName);
+    void logStage(uint64_t cycle, int hartId, uint32_t pc, const std::string& text, const char* stageName);
 };

@@ -31,6 +31,7 @@ enum class Op {
     // R-type ALU
     ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND,
     // Misc
+    AMOSWAP_W,
     NOP,
     HALT,      // synthetic "end of program" marker
     INVALID
@@ -49,6 +50,7 @@ enum class OpClass {
     JALR,       // rd = pc+4, redirect PC to rs1+imm
     LUI,        // rd = imm
     AUIPC,      // rd = pc + imm
+    AMO,
     NOP,
     HALT,
     INVALID

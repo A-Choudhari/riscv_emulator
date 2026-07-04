@@ -23,6 +23,7 @@ OpClass classify(Op op) {
         case Op::JALR: return OpClass::JALR;
         case Op::LUI:  return OpClass::LUI;
         case Op::AUIPC: return OpClass::AUIPC;
+        case Op::AMOSWAP_W: return OpClass::AMO;
         case Op::NOP:  return OpClass::NOP;
         case Op::HALT: return OpClass::HALT;
         default: return OpClass::INVALID;
@@ -34,7 +35,7 @@ bool writesRegister(Op op) {
     switch (c) {
         case OpClass::ALU_REG: case OpClass::ALU_IMM: case OpClass::LOAD:
         case OpClass::JAL: case OpClass::JALR: case OpClass::LUI:
-        case OpClass::AUIPC:
+        case OpClass::AUIPC: case OpClass::AMO:
             return true;
         default: return false;
     }
@@ -45,6 +46,7 @@ bool usesRs1(Op op) {
     switch (c) {
         case OpClass::ALU_REG: case OpClass::ALU_IMM: case OpClass::LOAD:
         case OpClass::STORE: case OpClass::BRANCH: case OpClass::JALR:
+        case OpClass::AMO:
             return true;
         default: return false;
     }
@@ -54,13 +56,14 @@ bool usesRs2(Op op) {
     OpClass c = classify(op);
     switch (c) {
         case OpClass::ALU_REG: case OpClass::STORE: case OpClass::BRANCH:
+        case OpClass::AMO:
             return true;
         default: return false;
     }
 }
 
 bool isBranch(Op op) { return classify(op) == OpClass::BRANCH; }
-bool isMemOp(Op op)  { auto c = classify(op); return c == OpClass::LOAD || c == OpClass::STORE; }
+bool isMemOp(Op op)  { auto c = classify(op); return c == OpClass::LOAD || c == OpClass::STORE || c == OpClass::AMO; }
 
 std::string opName(Op op) {
     static const std::unordered_map<Op, std::string> names = {
@@ -73,6 +76,7 @@ std::string opName(Op op) {
         {Op::ORI,"ori"},{Op::ANDI,"andi"},{Op::SLLI,"slli"},{Op::SRLI,"srli"},{Op::SRAI,"srai"},
         {Op::ADD,"add"},{Op::SUB,"sub"},{Op::SLL,"sll"},{Op::SLT,"slt"},{Op::SLTU,"sltu"},
         {Op::XOR,"xor"},{Op::SRL,"srl"},{Op::SRA,"sra"},{Op::OR,"or"},{Op::AND,"and"},
+        {Op::AMOSWAP_W,"amoswap.w"},
         {Op::NOP,"nop"},{Op::HALT,"halt"},{Op::INVALID,"???"}
     };
     auto it = names.find(op);

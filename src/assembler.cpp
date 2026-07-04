@@ -199,6 +199,12 @@ std::vector<Instruction> Assembler::assembleSource(const std::string& source) {
                 ins.op = Op::LUI; ins.rd = reg(toks.at(0)); ins.imm = parseImm(toks.at(1));
             } else if (mnemonic == "auipc") {
                 ins.op = Op::AUIPC; ins.rd = reg(toks.at(0)); ins.imm = parseImm(toks.at(1));
+            }
+            // ---- Atomic Operations ----
+            else if (mnemonic.rfind("amoswap.w", 0) == 0) {
+                ins.op = Op::AMOSWAP_W;
+                ins.rd = reg(toks.at(0)); ins.rs2 = reg(toks.at(1)); ins.rs1 = reg(toks.at(2));
+                ins.imm = 0;
             } else {
                 throw std::runtime_error("line " + std::to_string(rl.lineNo) + ": unknown mnemonic '" + mnemonic + "'");
             }

@@ -78,8 +78,7 @@ bool branchCond(Op op, int32_t a, int32_t b) {
 Simulator::Simulator(std::vector<Instruction> program, size_t dataMemBytes)
     : imem_(std::move(program)), dmem_(dataMemBytes) {}
 
-bool Simulator::step(uint64_t cycleNum) {
-    (void)cycleNum;
+bool Simulator::step(uint64_t cycleNum) {]
     // TODO: implement the full cycle. See the extended comment on this
     // function's declaration in simulator.h for the responsibilities.
     //
@@ -97,7 +96,75 @@ bool Simulator::step(uint64_t cycleNum) {
     //   9. commit: ifid_/idex_/exmem_/memwb_ = next*
     //  10. update stats_ (retirement count, cycles handled by run())
     //  11. return whether the pipeline should keep running
-    throw std::logic_error("TODO: Simulator::step() not implemented yet");
+    redirectEx_ = false;
+    redirectTargetEx_ = 0;
+    redirectId_ = false;
+    redirectTargetId_ = 0;
+    bool isStall = false;
+    if (idex_.valid && (classify(idex_.instr.op) == OpClass::LOAD) && (idex_.instr.rd != 0)) {
+        bool usesRs1InId = usesRs1(ifid_.instr.op) && (ifid_.instr.rs1 == idex_.instr.rd);
+        bool usesRs2InId = usesRs2(ifid_.instr.op) && (ifid_.instr.rs2 == idex_.instr.rd);
+        
+        if (ifid_.valid && (usesRs1InId || usesRs2InId)) {
+            isStall = true;
+            stats_.stalls.loadUseStalls++;
+        }
+    }
+    IF_ID_Latch nextIfId;
+    ID_EX_Latch nextIdEx;
+    EX_MEM_Latch nextExMem;
+    MEM_WB_Latch nextMemWb;
+    // 1. WB Stage (updates register file, reads current memwb_ latch)
+    stageWB();
+    // 2. MEM Stage (reads current exmem_, writes nextMemWb)
+    stageMEM(exmem_, nextMemWb);
+    // 3. EX Stage (reads current idex_, writes nextExMem)
+    stageEX(idex_, nextExMem);
+    // 4. ID Stage (reads current ifid_, writes nextIdEx)
+    stageID(ifid_, nextIdEx);
+    // 5. IF Stage (writes nextIfId)
+    if (!isStall) {
+        stageID(ifid_, nextIdEx);
+    }
+    if (redirectEx_) {
+        pc_ = redirectTargetEx_;
+        nextIdEx.valid = false;
+        nextIfId.valid = false;
+        stats_.stalls.controlHazardBubbles += 2;
+    } else if (redirectId_) {
+        pc_ = redirectTargetId_;
+        nextIfId.valid = false;
+        stats_.stalls.controlHazardBubbles += 1;
+    }
+    
+    if (memwb_.valid) {
+        stats_.instructionsRetired++;
+        logStage(cycleNum, memwb_.pc, memwb_.instr.text, "WB");
+    }
+    if (exmem_.valid) logStage(cycleNum, exmem_.pc, exmem_.instr.text, "MEM");
+    if (idex_.valid)  logStage(cycleNum, idex_.pc,  idex_.instr.text,  "EX");
+
+    if (ifid_.valid) {
+        if (isStall) {
+            logStage(cycleNum, ifid_.pc, ifid_.instr.text, "STALL");
+        } else {
+            logStage(cycleNum, ifid_.pc, ifid_.instr.text, "ID");
+        }
+    }
+
+    // Log instruction fetch (only if we actually fetched a valid instruction and did not stall)
+    if (nextIfId.valid && !isStall) {
+        logStage(cycleNum, nextIfId.pc, nextIfId.instr.text, "IF");
+    }
+    if (!isStall) {
+        ifid_ = nextIfId;
+    }
+    idex_ = nextIdEx;
+    exmem_ = nextExMem;
+    memwb_ = nextMemWb;
+
+    bool pipelineActive = ifid_.valid || idex_.valid || exmem_.valid || memwb_.valid;
+    return !(halted_ && !pipelineActive);
 }
 
 void Simulator::run(uint64_t maxCycles) {
@@ -302,6 +369,7 @@ void Simulator::stageID(IF_ID_Latch& cur, ID_EX_Latch& next) {
 
 void Simulator::stageIF(IF_ID_Latch& next) {
     // 1. Fetch instruction from imem_ at pc_
+    if (halted_) return;
     const Instruction& fetched = imem_.fetch(pc_);
     // 2. Halt handling
     if (fetched.op == Op::HALT) {

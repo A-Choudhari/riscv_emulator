@@ -137,7 +137,8 @@ private:
     // ID-stage prediction redirect (younger instruction) discovered in the
     // SAME cycle, and so IF knows to freeze on a load-use stall. How you
     // structure that is up to you.
-
+    bool redirectEx_ = false;          // Set by EX to trigger a pipeline redirect/flush
+    uint32_t redirectTargetEx_ = 0; 
     // One simulated clock edge. Return false once the pipeline has fully
     // drained after HALT is fetched (so run() knows to stop).
     //

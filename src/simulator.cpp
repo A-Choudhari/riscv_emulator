@@ -111,17 +111,60 @@ void Simulator::run(uint64_t maxCycles) {
 }
 
 void Simulator::stageWB() {
-    // TODO: if memwb_ holds a valid, register-writing instruction, write
-    // its result into regs_. Remember x0 must stay 0 (RegisterFile::write
-    // already handles that for you).
+    if(memwb_.valid) {
+        regs_.write(memwb_.instr.rd(), memwb_.writebackVal);
+    }
 }
 
 void Simulator::stageMEM(EX_MEM_Latch& cur, MEM_WB_Latch& next) {
-    (void)cur; (void)next;
-    // TODO: if cur is a LOAD, read from dmem_ (lb/lh/lw/lbu/lhu -- mind
-    // sign vs. zero extension). If cur is a STORE, write to dmem_
-    // (sb/sh/sw). Otherwise just pass the ALU result through untouched.
-    // Populate `next` accordingly (valid, instr, pc, writebackVal).
+    if(!cur.valid) {
+        next.valid = false;
+        return;
+    }
+    next.valid = true;
+    next.instr = cur.instr;
+    next.pc = cur.pc;
+    next.writebackVal = cur.storeVal;
+
+    if(classify(cur.instr.op) == OpClass::LOAD) {
+        switch(cur.instr.op) {
+            case Op::LB:
+                next.writebackVal = dmem_.readByte(cur.aluResult);
+                break;
+            case Op::LBU:
+                next.writebackVal = dmem_.readByte(cur.aluResult);
+                break;
+            case Op::LH:
+                next.writebackVal = dmem_.readHalf(cur.aluResult);
+                break;
+            case Op::LHU:
+                next.writebackVal = dmem_.readHalf(cur.aluResult);
+                break;
+            case Op::LW:
+                next.writebackVal = dmem_.readWord(cur.aluResult);
+                break;
+            default:
+                throw runtime_error("Invalid load opcode");
+            }
+    } else if(classify(cur.instr.op) == OpClass::STORE) {
+        switch(curinstr.op) {
+            case Op::SB:
+                dmem_.writeByte(cur.aluResult, (int8_t)cur.storeVal);
+                break;
+            case Op::SH:
+                dmem_.writeHalf(cur.aluResult, (int16_t)cur.storeVal);
+                break;
+            case Op::SW:
+                dmem_.writeWord(cur.aluResult, cur.storeVal);
+                break;
+            default:
+                throw runtime_error("Invalid store opcode");        
+        }
+        next.writebackVal = 0;
+    } else {
+        next.writebackVal = cur.aluResult;
+    }
+
 }
 
 void Simulator::stageEX(ID_EX_Latch& cur, EX_MEM_Latch& next) {
@@ -141,6 +184,67 @@ void Simulator::stageEX(ID_EX_Latch& cur, EX_MEM_Latch& next) {
     //    resolved here (not in ID) -- decide how you want to handle its
     //    redirect penalty.
     //  - Populate `next` (valid, instr, pc, aluResult, storeVal, ...).
+    if (!cur.valid) {
+        next.valid = false;
+        return;
+    }
+    next.valid = true;
+    next.instr = cur.instr;
+    next.pc = cur.pc;
+
+    bool fromEx, fromMem;
+    int32_t rs1 = forwardOperand(cur.instr.rs1, cur.rs1Val, exmem_, memwb_, &fromEx, &fromMem);
+    int32_t rs2 = forwardOperand(cur.instr.rs2, cur.rs2Val, exmem_, memwb_, &fromEx, &fromMem);
+    
+    if (usesRs1(cur.instr.op)) stats_.forwarding.totalAluOperandsChecked++;
+    if (usesRs2(cur.instr.op)) stats_.forwarding.totalAluOperandsChecked++;
+
+    if(classify(cur.instr.op) == OpClass::ALU_REG) {
+       next.aluResult = aluCompute(cur.instr.op, rs1, rs2); 
+       next.storeVal = rs2;
+    } else if(classify(cur.instr.op) == OpClass::ALU_IMM) {
+        next.aluResult = aluCompute(cur.instr.op, rs1, cur.instr.imm);
+        next.storeVal = 0;
+    } else if(classify(cur.instr.op) == OpClass::LOAD) {
+        next.aluResult = rs1 + cur.instr.imm;
+        next.storeVal = 0;
+    } else if(classify(cur.instr.op) == OpClass::STORE) {
+        next.aluResult = rs1 + cur.instr.imm;
+        next.storeVal = rs2;
+    } else if(classify(cur.instr.op) == OpClass::LUI) {
+        next.aluResult = cur.instr.imm;
+        next.storeVal = 0;
+    } else if(classify(cur.instr.op) == OpClass::AUIPC) {
+        next.aluResult = cur.pc + cur.instr.imm;
+        next.storeVal = 0;
+    } else if(classify(cur.instr.op) == OpClass::JAL) {
+        next.aluResult = cur.pc + 4;
+        next.storeVal = 0;
+    } else if(classify(cur.instr.op) == OpClass::JALR) {
+        next.aluResult = cur.pc + 4;
+        next.storeVal = 0;
+    } else if(classify(cur.instr.op) == OpClass::BRANCH) {
+        next.aluResult = branchCond(cur.instr.op, rs1, rs2);
+        next.storeVal = 0;
+    }
+
+    if (cur.instr.op == Op::JALR) {
+        redirectEx_ = true;
+        redirectTargetEx_ = (val1 + cur.instr.imm) & ~1;
+    }
+
+    if(isBranch(cur.instr.op)) {
+        bool taken = branchCond(cur.instr.op, rs1, rs2);
+        bool predict = predictor_.predict(cur.pc);
+
+        stats_.branchesResolved++;
+        if(taken != predict) {
+            stats_.branchMispredicts++;
+            redirectEx_ = true;
+            redirectTargetEx_ = taken ? (cur.pc + cur.instr.imm) : (cur.pc + 4);
+        }
+        predictor_.update(cur.pc, taken);
+    }
 }
 
 void Simulator::stageID(IF_ID_Latch& cur, ID_EX_Latch& next) {
@@ -157,6 +261,11 @@ void Simulator::stageID(IF_ID_Latch& cur, ID_EX_Latch& next) {
     //  - For JAL: target is fully known here (pc + imm) -- redirect
     //    unconditionally.
     //  - Populate `next` (valid, instr, pc, rs1val, rs2val, ...).
+    if(!cur.valid) {
+        next.valid = false;
+        return;
+    }
+    
 }
 
 void Simulator::stageIF(IF_ID_Latch& next) {
@@ -175,7 +284,6 @@ void Simulator::stageIF(IF_ID_Latch& next) {
 int32_t Simulator::forwardOperand(int regNum, int32_t rawVal,
                                    const EX_MEM_Latch& exmem, const MEM_WB_Latch& memwb,
                                    bool& fromEx, bool& fromMem) {
-    (void)regNum; (void)exmem; (void)memwb;
     fromEx = fromMem = false;
     // TODO: implement EX/MEM -> EX and MEM/WB -> EX forwarding. Remember:
     //  - x0 never forwards (always reads as 0).
@@ -184,6 +292,16 @@ int32_t Simulator::forwardOperand(int regNum, int32_t rawVal,
     //    instead, not by forwarding.
     //  - If both exmem and memwb could supply the register, the nearer
     //    one (exmem, i.e. EX/MEM) should win.
+    if(regNum == 0) {
+        return 0;
+    }
+    if(regNum == exmem.instr.rd && exmem.valid && writesRegister(exmem.instr.op) && classify(exmem.instr.op)) {
+        fromEx = true;
+        return exmem.aluResult;
+    } else if(regNum == memwb.instr.rd && memwb.valid && writesRegister(memwb.instr.op)) {
+        fromMem = true;
+        return memwb.writebackVal;
+    }
     return rawVal;
 }
 

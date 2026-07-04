@@ -28,8 +28,10 @@ public:
     // Returns true if this PC's branch should be predicted taken.
     // Must NOT modify predictor state (this is just a lookup).
     bool predict(uint32_t pc) const {
-        (void)pc;
-        // TODO: implement
+        if(bht.contains(pc)) {
+            return bht[pc] >= 2;
+        }
+        bht[pc] = 0;
         return false;
     }
 
@@ -37,13 +39,28 @@ public:
     // counter for this PC's BHT entry, and should also update whatever
     // running accuracy/counts you want to expose via accuracy()/total().
     void update(uint32_t pc, bool actuallyTaken) {
-        (void)pc; (void)actuallyTaken;
-        // TODO: implement
+        bool predicted = predict(pc);
+        if(predicted == actuallyTaken) {
+            correctPredictions++;
+        }
+        uint8_t state = bht.contains(pc) ? bht[pc] : 0;
+        if(actuallyTaken) {
+            if(state < 3) {
+                state++;
+            } 
+        } else {
+            if(state > 0) {
+                state--;
+            }
+        }
+        bht[pc] = state;
     }
 
     double accuracy() const {
-        // TODO: implement
-        return 0.0;
+        if(totalBranches == 0) {
+            return 0.0;
+        }
+        return (double)correctPredictions / totalBranches;
     }
 
     uint64_t total() const { return totalBranches; }

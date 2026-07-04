@@ -168,7 +168,6 @@ void Simulator::stageMEM(EX_MEM_Latch& cur, MEM_WB_Latch& next) {
 }
 
 void Simulator::stageEX(ID_EX_Latch& cur, EX_MEM_Latch& next) {
-    (void)cur; (void)next;
     // TODO:
     //  - Determine the actual operands to use, applying forwarding via
     //    forwardOperand() (from exmem_ / memwb_ member state) instead of
@@ -248,7 +247,6 @@ void Simulator::stageEX(ID_EX_Latch& cur, EX_MEM_Latch& next) {
 }
 
 void Simulator::stageID(IF_ID_Latch& cur, ID_EX_Latch& next) {
-    (void)cur; (void)next;
     // TODO:
     //  - If this cycle is a load-use stall, next should be a bubble
     //    (leave it invalid) and cur should be re-decoded next cycle.
@@ -265,33 +263,64 @@ void Simulator::stageID(IF_ID_Latch& cur, ID_EX_Latch& next) {
         next.valid = false;
         return;
     }
-    
+
+    bool isStall = false;
+    if (idex_.valid && classify(idex_.instr.op) == OpClass::LOAD && idex_.instr.rd != 0) {
+        bool usesRs1InId = usesRs1(cur.instr.op) && (cur.instr.rs1 == idex_.instr.rd);
+        bool usesRs2InId = usesRs2(cur.instr.op) && (cur.instr.rs2 == idex_.instr.rd);
+        if (usesRs1InId || usesRs2InId) {
+            isStall = true;
+        }
+    }
+    if (isStall) {
+        next.valid = false;
+        stats_.stalls.loadUseStalls++;
+        return;
+    }
+    next.valid = true;
+    next.instr = cur.instr;
+    next.pc = cur.pc;
+    next.rs1val = regs_.read(cur.instr.rs1);
+    next.rs2val = regs_.read(cur.instr.rs2);
+    next.predictedTaken = false; // Default prediction
+    if (cur.instr.op == Op::JAL) {
+        redirectId_ = true;
+        redirectTargetId_ = cur.pc + cur.instr.imm;
+        next.predictedTaken = true; // Mark as taken
+        return;
+    }
+
+    if (isBranch(cur.instr.op)) {
+        bool predictTaken = predictor_.predict(cur.pc);
+        next.predictedTaken = predictTaken;
+        if (predictTaken) {
+            redirectId_ = true;
+            redirectTargetId_ = cur.pc + cur.instr.imm;
+        }
+    }
 }
 
 void Simulator::stageIF(IF_ID_Latch& next) {
+    // 1. Fetch instruction from imem_ at pc_
     const Instruction& fetched = imem_.fetch(pc_);
-    if(fetched.op == Op::HALT) {
+    // 2. Halt handling
+    if (fetched.op == Op::HALT) {
         halted_ = true;
         next.valid = false;
         return;
     }
+    // 3. Populate next latch
     next.instr = fetched;
     next.valid = true;
     next.pc = pc_;
-    pc_+=4;
+    // 4. Advance PC sequentially
+    pc_ += 4;
 }
 
 int32_t Simulator::forwardOperand(int regNum, int32_t rawVal,
                                    const EX_MEM_Latch& exmem, const MEM_WB_Latch& memwb,
                                    bool& fromEx, bool& fromMem) {
     fromEx = fromMem = false;
-    // TODO: implement EX/MEM -> EX and MEM/WB -> EX forwarding. Remember:
-    //  - x0 never forwards (always reads as 0).
-    //  - EX/MEM can't forward for LOADs (data isn't ready until MEM
-    //    completes) -- that's the load-use hazard, handled by stalling
-    //    instead, not by forwarding.
-    //  - If both exmem and memwb could supply the register, the nearer
-    //    one (exmem, i.e. EX/MEM) should win.
     if(regNum == 0) {
         return 0;
     }

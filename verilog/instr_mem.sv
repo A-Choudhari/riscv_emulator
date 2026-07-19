@@ -1,10 +1,9 @@
-// Design
 // Instruction Memory
 module instr_mem (addr, instr);
   input     [3:0] addr;
   output	[7:0] instr;
 
-  wire [7:0] mem [0:15];
+  reg [7:0] mem [0:15];
   
   initial begin
     mem[0]  = 8'b00000001;

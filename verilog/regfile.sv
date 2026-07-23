@@ -3,8 +3,8 @@
 module regfile (clk, i_reg1,
   i_reg2, w_addr, write_enable, write_data, o_reg1, o_reg2);
   input      clk;
-  input      [2:0]i_reg1;
-  input      [2:0]i_reg2;
+  input      [1:0]i_reg1;
+  input      [1:0]i_reg2;
   input		 [2:0]w_addr;
   input		 write_enable;
   input		 [3:0]write_data;

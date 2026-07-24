@@ -14,6 +14,14 @@ module regfile (clk, i_reg1,
   reg [3:0] file [0:3];
   assign o_reg1 = file[i_reg1];
   assign o_reg2 = file[i_reg2];
+  initial begin
+    file[0] = 1;
+    file[1] = 2;
+    file[2] = 3;
+    file[3] = 4;
+
+  end
+  
   always @(posedge clk)
   begin
     if (write_enable) begin
